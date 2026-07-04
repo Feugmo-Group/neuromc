@@ -7,10 +7,25 @@ in porous materials using machine-learned interatomic potentials.
 
 __version__ = "0.1.2"
 
-from .src.gcmc import MLP_GCMC
-from .src.widom import MLP_Widom
-from .src.utilities import PREOS, read_binary_log, read_widom_binary_log
-from .main import run_gcmc, run_widom
 
-__all__ = ['MLP_GCMC', 'MLP_Widom', 'PREOS', 'run_gcmc', 'run_widom', 'read_binary_log', 'read_widom_binary_log']
+def __getattr__(name):
+    _core = {'MLP_GCMC', 'MLP_Widom', 'PREOS', 'run_gcmc', 'run_widom',
+             'read_binary_log', 'read_widom_binary_log'}
+    if name in _core:
+        from .src.gcmc import MLP_GCMC
+        from .src.widom import MLP_Widom
+        from .src.utilities import PREOS, read_binary_log, read_widom_binary_log
+        from .main import run_gcmc, run_widom
+        globals().update({
+            'MLP_GCMC': MLP_GCMC, 'MLP_Widom': MLP_Widom,
+            'PREOS': PREOS, 'run_gcmc': run_gcmc, 'run_widom': run_widom,
+            'read_binary_log': read_binary_log,
+            'read_widom_binary_log': read_widom_binary_log,
+        })
+        return globals()[name]
+    raise AttributeError(f"module 'mlip_mc' has no attribute {name!r}")
+
+
+__all__ = ['MLP_GCMC', 'MLP_Widom', 'PREOS', 'run_gcmc', 'run_widom',
+           'read_binary_log', 'read_widom_binary_log']
 

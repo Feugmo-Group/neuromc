@@ -1,0 +1,58 @@
+# Sammüller 2024-style campaign config
+# Reproduces the random-V_ext sweep protocol from:
+#   Sammüller et al., J. Phys.: Condens. Matter 36, 243002 (2024)
+#   Evans et al., Phys. Rev. Lett. 134, 148001 (2025)
+#
+# Usage:
+#   mlip_mc --mode dft-data \
+#           --campaign-config configs/campaign_sammuller.yaml \
+#           --model hf://your-org/your-repo
+#
+# Or programmatically:
+#   from mlip_mc.dft.campaign import GCMCCampaign
+#   campaign = GCMCCampaign(config=yaml.safe_load(open(...)), model=model)
+#   campaign.run()
+
+# ── Structures ────────────────────────────────────────────────────────────────
+adsorbent: tests/zif8.xyz          # framework — replace with your slab/pore
+adsorbate_molecule: CO2            # or use adsorbate_path: path/to/mol.xyz
+
+# ── Thermodynamic state space ─────────────────────────────────────────────────
+temperature: 300.0                 # K  (or list: [250.0, 300.0, 350.0])
+mu_values:                         # chemical potentials [eV]
+  - -0.50
+  - -0.35
+  - -0.20
+  - -0.05
+  - 0.10
+
+# Number of independent random V_ext draws per (T, μ) combination.
+# Sammüller 2024 used ~1000 runs total; start with 50 for testing.
+n_runs: 50
+
+# ── MC parameters ────────────────────────────────────────────────────────────
+n_equilibration_steps: 5000
+n_production_steps: 20000
+
+# ── Density grid ─────────────────────────────────────────────────────────────
+grid:
+  n_bins: 200      # bins along projection axis → dz ≈ 0.1 Å for 20 Å box
+  axis: 2          # project onto z (planar geometry)
+  n_blocks: 10     # block-averaging blocks for uncertainty quantification
+
+# ── External potential (random Fourier series, Sammüller protocol) ────────────
+v_ext:
+  type: fourier
+  n_modes: 4
+  amplitude_scale: 0.10   # eV — Gaussian σ for random amplitude draw
+  # L: null               # auto-detected from box length along axis
+
+# ── Model & output ────────────────────────────────────────────────────────────
+# model: path/to/model.pt  # override via --model on CLI
+output_dir: ./cdft_data
+seed: 42                   # for reproducibility of random V_ext draws
+
+# ── Learnable operators this dataset supports ─────────────────────────────────
+# G₁: V_ext(r) → ρ(r)               (forward cDFT problem)
+# G₂: ρ(r)     → c⁽¹⁾(r) = δF/δρ   (neural functional — Sammüller target)
+# G₃: c⁽¹⁾(r)  → F_exc              (thermodynamic integration)

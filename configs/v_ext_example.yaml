@@ -1,0 +1,26 @@
+# V_ext primitive config — passed via --v-ext-config or in campaign YAML under v_ext:
+#
+# Supported types: hard_wall, linear_ramp, gaussian, sinusoid, fourier
+# Multiple components compose additively via CompositeField.
+#
+# For random V_ext sweeps (Sammüller protocol), use type: fourier with
+# amplitude_scale and let GCMCCampaign draw random amplitudes/phases each run.
+
+components:
+  - type: hard_wall
+    axis: 2          # z-axis confinement
+    z_lo: 0.0        # Å — lower wall
+    z_hi: 20.0       # Å — upper wall
+    strength: 1000.0 # eV·Å¹²
+
+  - type: fourier
+    axis: 2
+    n_modes: 4
+    amplitudes: [0.10, -0.05, 0.08, -0.03]   # eV
+    phases:     [0.00,  1.57, 0.30,  2.10]   # rad
+    L: 20.0                                   # box length along axis [Å]
+
+  - type: gaussian
+    center: [10.0, 10.0, 10.0]   # Å
+    amplitude: -0.15              # eV  (negative = attractive pocket)
+    sigma: 1.5                    # Å
