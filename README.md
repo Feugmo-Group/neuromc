@@ -1,95 +1,166 @@
 # neuromc
 
-**Neural Monte Carlo** — Grand Canonical Monte Carlo, classical density functional theory, and neural functional theory data generation, powered by machine-learned interatomic potentials.
+**Neural Monte Carlo** — training-data generation for neural classical density functional theory (cDFT) operators, via Grand Canonical Monte Carlo and Widom insertion with machine-learned interatomic potentials.
 
-> **Derived from** [jackevansadl/MLIP-MC](https://github.com/jackevansadl/MLIP-MC), which provides the original GCMC engine for gas adsorption in porous materials. neuromc extends that foundation with a full classical DFT subpackage, general particle GCMC for atoms/molecules/ions, Widom insertion, and a training-data pipeline for neural operators targeting the [ionax](../ionax) PNP-cDFT solver.
+> **Derived from** [jackevansadl/MLIP-MC](https://github.com/jackevansadl/MLIP-MC). The original package targets gas adsorption in porous materials; neuromc repurposes and extends the same GCMC engine to generate density profiles, excess chemical potentials, and c₁ functionals for training neural operators that replace classical FMT+MSA functionals inside [ionax](https://github.com/Feugmo-Group/ionax).
 
 ---
 
-## What neuromc does
+## Project tools
 
-| Module | Capability |
+neuromc is part of a three-package ecosystem:
+
+| Package | Role | Repo |
+|---|---|---|
+| **neuromc** | Generate MC/GCMC training data (density profiles, c₁, μ_ex) | this repo |
+| **ionax** | JAX-based PNP + cDFT/DDFT solver; target for the neural operators | `../ionax` |
+| **torch-sim** | GPU MD engine; RNEMD, Green-Kubo, g(r), viscosity after MLIP training | `../torch-sim` (`implementation-branch`) |
+
+The intended workflow:
+
+```
+neuromc  →  training dataset (z, ρ, c₁, V_ext)
+    ↓
+Train neural operator  (replaces FMT+MSA in ionax)
+    ↓
+ionax  →  fast neural cDFT/DDFT for solid electrolytes
+    ↓
+torch-sim  →  MD transport properties (κ, D, η, g(r))
+```
+
+### torch-sim — what is implemented (`implementation-branch`)
+
+Transport property calculations live in the `implementation-branch` of torch-sim:
+
+| Feature | Class / function | File |
+|---|---|---|
+| Thermal conductivity (RNEMD) | `RNEMD` | `torch_sim/workflows/RNEMD.py` |
+| Thermal conductivity (Green-Kubo) | `HeatFluxAutoCorrelation` | `torch_sim/properties/correlations.py` |
+| Diffusion coefficient | `VelocityAutoCorrelation` | `torch_sim/properties/correlations.py` |
+| Radial distribution function g(r) | `RadialDistributionFunction` | `torch_sim/properties/correlations.py` |
+| Shear viscosity (Green-Kubo) | `PressureAutoCorrelation` | `torch_sim/properties/correlations.py` |
+| Classical ionic reference | `FumiTosiModel` | `torch_sim/models/fumi_tosi.py` |
+
+**Neighbor-list acceleration — NVIDIA nvalchemiops**: torch-sim automatically uses [`nvalchemiops`](https://github.com/NVIDIA/nvalchemiops), NVIDIA's CUDA-accelerated neighbor-list library, when it is installed. This is purely a speed optimization (it is not a dispersion correction) that accelerates the pair-distance search at every MD step. Priority order at runtime:
+
+```
+nvalchemiops  (CUDA kernel, fastest — NVIDIA GPU only)
+vesin         (cross-platform, fast)
+torch_nl      (pure PyTorch, always available)
+```
+
+Install on NVIDIA hardware:
+
+```bash
+pip install nvalchemiops
+```
+
+No code changes are needed — `torchsim_nl()` detects and uses it automatically.
+
+---
+
+## What neuromc generates
+
+| Module | Output |
 |---|---|
-| `neuromc` (core) | GCMC isotherms and Widom insertion for gas adsorption using any MLIP backend |
-| `neuromc.dft` | 1D hard-rod and 3D RPM model-fluid GCMC + Percus/FMT classical DFT |
-| `neuromc.dft.particle_gcmc` | General GCMC for **atoms, molecules, and ions** with any ASE calculator |
-| `neuromc.dft.widom` | Widom test-particle insertion (hard rods + RPM ionic system) |
-| `neuromc.dft.percus` | Percus exact 1D FMT functional with full c₁ (both convolution terms) |
-| `neuromc.dft.oz` | Ornstein-Zernike inversion for c⁽²⁾ and pair correlations |
-
-The `neuromc.dft` subpackage generates training data for neural operators that replace classical FMT+MSA functionals inside ionax, enabling fast neural cDFT/DDFT for solid electrolytes.
+| `neuromc.dft.hard_rod_sim` | 1D GCMC density profiles ρ(x) for hard-rod model fluid |
+| `neuromc.dft.rpm_sim` | 3D RPM ionic GCMC density profiles ρ±(z) |
+| `neuromc.dft.particle_gcmc` | GCMC density profiles for **atoms, molecules, or ions** with any MLIP |
+| `neuromc.dft.widom` | Excess chemical potential μ_ex via Widom insertion |
+| `neuromc.dft.percus` | Exact Percus/FMT c₁ functional (1D reference) |
+| `neuromc.dft.oz` | Ornstein-Zernike inversion for pair correlations c⁽²⁾ |
+| `neuromc.dft.generate_cdft_training_data` | ionax-compatible dataset: (z_nm, ρ_nm³, c₁, V_ext, μ, T) |
 
 ---
 
 ## Installation
 
-Pick one MLIP backend. The package auto-detects whichever is installed.
+### With uv (recommended)
 
 ```bash
-# Clone
 git clone https://github.com/Feugmo-Group/neuromc.git
 cd neuromc
 
-# Install with MACE backend (recommended)
-pip install -e ".[mace-torch,dev]"
+# Core + DFT subpackage
+uv sync --extra dft
+
+# Core + MACE backend + DFT
+uv sync --extra mace-torch --extra dft
+
+# Core + fairchem backend
+uv sync --extra fairchem
+
+# Core + orb-models backend
+uv sync --extra orb-models
+
+# Everything
+uv sync --extra full
+```
+
+### With pip
+
+```bash
+git clone https://github.com/Feugmo-Group/neuromc.git
+cd neuromc
+
+# Core + MACE backend (recommended)
+pip install -e ".[mace-torch,dft,dev]"
 
 # Or with fairchem
-pip install -e ".[fairchem,dev]"
+pip install -e ".[fairchem,dft,dev]"
 
 # Or with orb-models
-pip install -e ".[orb-models,dev]"
-
-# Install the full DFT subpackage (JAX environment recommended)
-pip install -e ".[dft,dev]"
+pip install -e ".[orb-models,dft,dev]"
 ```
+
+### Optional dependencies summary
+
+| Extra | What it adds |
+|---|---|
+| `mace-torch` | MACE-MP MLIP backend |
+| `fairchem` | fairchem / UMA MLIP backend |
+| `orb-models` | orb-models MLIP backend |
+| `dft` | JAX, equinox, optax, scipy — needed for `neuromc.dft` |
+| `full` | `dft` + MACE in one command |
+| `dev` | pytest, ruff |
 
 Model weights are resolved automatically. Pass a local path or an `hf://org/repo[:filename]` URI; downloads are cached at `$NEUROMC_CACHE` (default `~/.cache/neuromc/`).
 
 ---
 
-## CLI — gas adsorption (core)
+## Python API
 
-The `neuromc` command provides two simulation modes.
+### Generate ionax-compatible training data (main use case)
 
-### GCMC isotherm
+```python
+from neuromc.dft.particle_gcmc import generate_cdft_training_data
+from ase.io import read
 
-```bash
-neuromc --mode gcmc \
-        --adsorbent framework.xyz \
-        --adsorbate-molecule CO2 \
-        --temperature 298.0 \
-        --pressures 0.1,1.0,5.0 \
-        --model model.pt
+framework  = read("lipon_supercell.xyz")   # host structure
+li_atom    = read("Li.xyz")                # particle to insert
+calculator = ...                           # any ASE Calculator (MACE, orb, etc.)
+
+dataset = generate_cdft_training_data(
+    framework, li_atom, calculator,
+    mu_values=[-4.0, -3.5, -3.0, -2.5],   # chemical potentials (eV)
+    T=600.0,                                # temperature (K)
+)
+
+# Each entry in dataset:
+# {
+#   'z_nm'     : np.ndarray  — grid positions in nm
+#   'rho_nm3'  : np.ndarray  — density in nm⁻³
+#   'c1'       : np.ndarray  — one-body direct correlation (kT units)
+#   'vext_kT'  : np.ndarray  — external potential (kT units)
+#   'mu'       : float       — chemical potential (eV)
+#   'T'        : float       — temperature (K)
+#   'avg_n'    : float       — average particle count
+# }
 ```
 
-### Widom insertion (Henry coefficient)
+The `c₁(z)` column is the training target for a neural operator implementing `ExcessFreeEnergy.chemical_potential()` in ionax.
 
-```bash
-neuromc --mode widom \
-        --adsorbent framework.xyz \
-        --adsorbate-molecule CO2 \
-        --temperature 298.0 \
-        --n-trials 10000 \
-        --model model.pt
-```
-
-Output lands in `results/` by default (`--output-dir` to override):
-
-```
-results/
-  isotherm_data.json          # GCMC aggregate
-  log_{P}bar.bin              # binary log (authoritative)
-  traj_{P}bar.xyz
-  restart/restart_{P}bar.*
-  widom_results.json          # Widom
-  log_widom.bin
-```
-
----
-
-## Python API — classical DFT and model fluids
-
-### 1D hard-rod fluid (Sammüller 2024)
+### 1D hard-rod model fluid (Sammüller 2024 benchmark)
 
 ```python
 from neuromc.dft.hard_rod_sim import simulate
@@ -100,7 +171,7 @@ x, rho_mc, _ = simulate(L=30.0, mu=-1.0, T=1.0,
                          vext_fn=lambda x: 0.0,
                          n_prod=100_000)
 
-# Percus DFT profile
+# Exact Percus DFT profile
 x_dft, rho_dft = dft_minimize(
     L=30.0, mu=-1.0, T=1.0,
     vext_fn=lambda x: 0.0,
@@ -108,7 +179,7 @@ x_dft, rho_dft = dft_minimize(
 )
 ```
 
-### Widom insertion
+### Widom insertion — excess chemical potential
 
 ```python
 from neuromc.dft.widom import widom_hard_rod, widom_rpm
@@ -123,66 +194,51 @@ result = widom_rpm(Lx=10.0, Ly=10.0, Lz=20.0,
 print(f"mu_ex+/- = {result['mu_ex_plus']:.3f}, {result['mu_ex_minus']:.3f}")
 ```
 
-### General particle GCMC (atoms / molecules / ions)
-
-Works with any ASE calculator — MLIP, classical force field, or mock.
+### GCMC density profile for any particle
 
 ```python
-from neuromc.dft.particle_gcmc import simulate_particle_gcmc, generate_cdft_training_data
-from ase.io import read
+from neuromc.dft.particle_gcmc import simulate_particle_gcmc
 
-framework  = read("lipon_supercell.xyz")
-li_atom    = read("Li.xyz")        # single Li atom
-calculator = ...                   # any ASE Calculator
-
-z_centers, rho, *_ = simulate_particle_gcmc(
+z_centers, rho, mu, T, avg_n, n_trace, system = simulate_particle_gcmc(
     framework, li_atom, calculator,
     mu=-3.5, T=600.0,
 )
-
-# Generate ionax-compatible training data
-dataset = generate_cdft_training_data(
-    framework, li_atom, calculator,
-    mu_values=[-4.0, -3.5, -3.0, -2.5],
-    T=600.0,
-)
-# Each entry: z_nm, rho_nm3, c1, vext_kT, mu, T, avg_n
 ```
-
-The `c₁(z)` values directly implement `ExcessFreeEnergy.chemical_potential()` from the ionax interface (kT units, nm grid).
 
 ---
 
 ## Architecture
 
-Three-layer structure:
-
-### 1. CLI / orchestration (`neuromc/cli.py`, `neuromc/main.py`)
-
-`cli.py::main` parses arguments and dispatches to `run_gcmc` / `run_widom` in `main.py`. Model resolution (`hf://` URIs), backend detection, and calculator loading all live in `main.py`. GPU parallelism over pressures uses `multiprocessing` with the **spawn** start method — calculator imports must stay inside worker functions to preserve GPU isolation.
-
-### 2. Physics engines (`neuromc/src/`)
-
-- `gcmc.py` — `MLP_GCMC`: four move types (insert/delete/translate/rotate), binary log, restart files, checkpoints
-- `widom.py` — `MLP_Widom`: Widom insertion for porous-material gas adsorption
-- `utilities.py` — `PREOS` (Peng-Robinson EOS for fugacities), binary log readers
-
-### 3. Classical DFT subpackage (`neuromc/dft/`)
+### 1. DFT subpackage (`neuromc/dft/`) — primary
 
 | File | Contents |
 |---|---|
-| `hard_rod_sim.py` | 1D GCMC for hard rods; `HardRodSystem`, `simulate` |
-| `rpm_sim.py` | 3D RPM ionic GCMC; `RPMSystem` |
-| `percus.py` | Percus exact FMT; `c1_percus`, `dft_minimize` |
-| `oz.py` | Ornstein-Zernike inversion; `oz_invert`, `oz_solve` |
-| `widom.py` | `WidomHardRod`, `WidomRPM` and convenience drivers |
 | `particle_gcmc.py` | `ParticleGCMC`, `simulate_particle_gcmc`, `generate_cdft_training_data` |
-| `pair_dist.py` | Pair distribution function utilities |
-| `density_grid.py` | Grid and density field helpers |
+| `hard_rod_sim.py` | 1D GCMC: `HardRodSystem`, `simulate`, `generate_random_vext` |
+| `rpm_sim.py` | 3D RPM ionic GCMC: `RPMSystem` |
+| `percus.py` | Percus exact FMT: `c1_percus`, `dft_minimize` |
+| `oz.py` | Ornstein-Zernike inversion: `oz_invert`, `oz_solve` |
+| `widom.py` | `WidomHardRod`, `WidomRPM`, convenience drivers |
 | `neural_functional.py` | Neural operator interface for trained c₁ models |
-| `sample_writer.py` | HDF5 output for training datasets |
+| `sample_writer.py` | HDF5 writer for training datasets |
 | `campaign.py` | Multi-condition campaign runner |
+| `density_grid.py` | Grid and density field helpers |
+| `pair_dist.py` | Pair distribution utilities |
 | `external_field.py` | External potential helpers |
+
+ASE is imported lazily inside methods — `neuromc.dft` works without ASE for pure model-fluid calculations.
+
+### 2. MLIP-MC legacy engines (`neuromc/src/`) — inherited
+
+Retained from the original MLIP-MC for porous-material adsorption use cases:
+
+- `gcmc.py` — `MLP_GCMC`: four move types, binary log, restart, checkpoints
+- `widom.py` — `MLP_Widom`: Widom insertion with MLIP energy
+- `utilities.py` — `PREOS` (Peng-Robinson EOS), binary log readers
+
+### 3. CLI (`neuromc/cli.py`, `neuromc/main.py`) — inherited
+
+Retained from MLIP-MC. Dispatches `--mode gcmc` and `--mode widom` for MLIP-driven porous-material simulations. GPU parallelism over pressures uses `multiprocessing` with the **spawn** start method; MLIP imports stay inside worker functions to preserve GPU isolation.
 
 ---
 
@@ -190,23 +246,23 @@ Three-layer structure:
 
 Three backends are supported and auto-detected in order:
 
-| Backend | Install | Notes |
+| Backend | Extra | Notes |
 |---|---|---|
-| **fairchem** | `pip install fairchem-core` | UMA / eSEN foundation models |
-| **mace-torch** | `pip install mace-torch` | MACE-MP; `dispersion=True` adds D3 correction |
-| **orb-models** | `pip install orb-models` | Falls back to pretrained `orb_v3_conservative_inf_omat` if no local path given |
+| **fairchem** | `fairchem` | UMA / eSEN foundation models |
+| **mace-torch** | `mace-torch` | MACE-MP; `dispersion=True` for D3 correction |
+| **orb-models** | `orb-models` | Falls back to `orb_v3_conservative_inf_omat` if no local path given |
 
 ---
 
 ## Tests
 
 ```bash
-pytest                                       # full suite
-pytest tests/test_gcmc.py                   # core GCMC
-pytest tests/test_dft_widom.py              # DFT Widom
-pytest tests/test_dft_particle_gcmc.py      # particle GCMC (requires ASE)
-pytest -k hard_rod                          # by keyword
-pytest tests/test_gcmc.py::TestEInteractionOfAdsorption::test_calculation  # single test
+pytest                                                               # full suite
+pytest tests/test_dft_widom.py                                      # Widom insertion
+pytest tests/test_dft_particle_gcmc.py                              # particle GCMC (requires ASE)
+pytest tests/test_gcmc.py                                           # legacy GCMC
+pytest -k hard_rod                                                   # by keyword
+pytest tests/test_gcmc.py::TestEInteractionOfAdsorption::test_calculation
 ```
 
 75 tests pass without ASE. 37 additional tests (particle GCMC) require an ASE-enabled environment.
@@ -215,22 +271,22 @@ pytest tests/test_gcmc.py::TestEInteractionOfAdsorption::test_calculation  # sin
 
 ## Key physics
 
-**Tonks EOS** (exact, 1D hard rods):
+**Sammüller identity** — neural functional training target:
 
 ```
-βμ = ln(ρ/(1−ρ)) + ρ/(1−ρ)
+c₁(r) = ln ρ(r) − βμ_loc(r)
 ```
 
-**Percus c₁** (full FMT functional derivative):
+**Percus c₁** — full FMT functional derivative (1D exact):
 
 ```
 c₁(r) = [(ln(1−n₁)) ⊛ ω₀](r) − [(n₀/(1−n₁)) ⊛ ω₁](r)
 ```
 
-**Sammüller identity** (neural functional training target):
+**Tonks EOS** — exact bulk 1D hard-rod equation of state:
 
 ```
-c₁(r) = ln ρ(r) − βμ_loc(r)
+βμ = ln(ρ/(1−ρ)) + ρ/(1−ρ)
 ```
 
 **Widom insertion**:
@@ -247,8 +303,8 @@ If you use neuromc, please cite both this package and the original MLIP-MC it is
 
 ```bibtex
 @software{neuromc,
-  title  = {{neuromc}: Neural Monte Carlo --- GCMC, Classical DFT, and Neural Functional Theory
-            with Machine-Learned Interatomic Potentials},
+  title  = {{neuromc}: Neural Monte Carlo --- Training-Data Generation for Neural
+            cDFT Operators with Machine-Learned Interatomic Potentials},
   author = {Tetsassi Feugmo, Conrard},
   url    = {https://github.com/Feugmo-Group/neuromc},
   year   = {2026},

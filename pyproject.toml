@@ -5,38 +5,68 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neuromc"
 version = "0.2.0"
-description = "Neural Monte Carlo: GCMC, classical DFT, and neural functional theory with machine-learned interatomic potentials"
+description = "Neural Monte Carlo: training-data generation for neural cDFT operators via GCMC and classical DFT with machine-learned interatomic potentials"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "Conrard Tetsassi Feugmo" }]
+authors = [{ name = "Conrard Tetsassi Feugmo", email = "giresse.feugmo@gmail.com" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["ase", "huggingface_hub"]
+dependencies = [
+  "numpy>=1.24",
+  "ase>=3.22",
+  "huggingface_hub",
+  "h5py",
+  "pyyaml",
+]
 
 [project.optional-dependencies]
-dev = ["pytest"]
-fairchem = ["fairchem-core"]
+# MLIP backends (pick one)
+fairchem   = ["fairchem-core"]
 mace-torch = ["mace-torch"]
 orb-models = ["orb-models"]
-dft = ["nvalchemi-toolkit", "warp-lang", "h5py", "pyyaml", "torch-sim-atomistic"]
+
+# Classical DFT + neural functional subpackage
+dft = [
+  "jax",
+  "equinox",
+  "optax",
+  "scipy",
+]
+
+# Full stack (DFT + MACE)
+full = [
+  "neuromc[dft]",
+  "mace-torch",
+]
+
+# Development
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+]
 
 [tool.uv]
-dev-dependencies = ["pytest"]
+dev-dependencies = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+]
 
 [project.scripts]
 neuromc = "neuromc.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Feugmo-Group/neuromc"
+Homepage          = "https://github.com/Feugmo-Group/neuromc"
 "Original MLIP-MC" = "https://github.com/jackevansadl/MLIP-MC"
 
 [tool.setuptools]
@@ -47,3 +77,10 @@ include = ["neuromc", "neuromc.*"]
 
 [tool.setuptools.package-data]
 neuromc = ["data/*.csv"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
