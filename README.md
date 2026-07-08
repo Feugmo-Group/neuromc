@@ -14,7 +14,7 @@ neuromc is part of a three-package ecosystem:
 |---|---|---|
 | **neuromc** | Generate MC/GCMC training data (density profiles, c₁, μ_ex) | this repo |
 | **ionax** | JAX-based PNP + cDFT/DDFT solver; target for the neural operators | `../ionax` |
-| **torch-sim** | GPU MD engine; RNEMD, Green-Kubo, g(r), viscosity after MLIP training | `../torch-sim` (`implementation-branch`) |
+| **torch-sim** | GPU MD engine for running MLIP simulations | `../torch-sim` (`implementation-branch`) |
 
 The intended workflow:
 
@@ -23,9 +23,7 @@ neuromc  →  training dataset (z, ρ, c₁, V_ext)
     ↓
 Train neural operator  (replaces FMT+MSA in ionax)
     ↓
-ionax  →  fast neural cDFT/DDFT for solid electrolytes
-    ↓
-torch-sim  →  MD transport properties (κ, D, η, g(r))
+ionax  →  fast neural cDFT/DDFT
 ```
 
 ### Using torch-sim to load the MLIP for neuromc
@@ -112,29 +110,59 @@ pip install nvalchemiops   # optional, NVIDIA GPU only
 
 ## Installation
 
-### With uv (recommended)
+### 1. Install uv
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package and project manager. Install it once:
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Or with pip
+pip install uv
+```
+
+### 2. Clone and install neuromc
 
 ```bash
 git clone https://github.com/Feugmo-Group/neuromc.git
 cd neuromc
 
-# Core + DFT subpackage
+# Install core + DFT subpackage (no MLIP backend)
 uv sync --extra dft
 
-# Core + MACE backend + DFT
+# Install core + MACE backend + DFT (recommended)
 uv sync --extra mace-torch --extra dft
 
-# Core + fairchem backend
-uv sync --extra fairchem
+# Install core + fairchem backend
+uv sync --extra fairchem --extra dft
 
-# Core + orb-models backend
-uv sync --extra orb-models
+# Install core + orb-models backend
+uv sync --extra orb-models --extra dft
 
-# Everything
+# Install everything at once
 uv sync --extra full
 ```
 
-### With pip
+`uv sync` creates an isolated virtual environment in `.venv/` automatically.
+Activate it with:
+
+```bash
+source .venv/bin/activate        # macOS / Linux
+.venv\Scripts\activate           # Windows
+```
+
+Or run commands directly without activating:
+
+```bash
+uv run pytest
+uv run neuromc --help
+```
+
+### With pip (alternative)
 
 ```bash
 git clone https://github.com/Feugmo-Group/neuromc.git
