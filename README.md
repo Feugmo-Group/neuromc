@@ -243,9 +243,17 @@ exp(−β·μ_ex) = ⟨exp(−β·ΔU)⟩_N
 
 ## Citation
 
-If you use neuromc, please cite the original MLIP-MC package:
+If you use neuromc, please cite both this package and the original MLIP-MC it is derived from:
 
 ```bibtex
+@software{neuromc,
+  title  = {{neuromc}: Neural Monte Carlo --- GCMC, Classical DFT, and Neural Functional Theory
+            with Machine-Learned Interatomic Potentials},
+  author = {Tetsassi Feugmo, Conrard},
+  url    = {https://github.com/Feugmo-Group/neuromc},
+  year   = {2026},
+}
+
 @software{mlip_mc,
   title  = {{MLIP-MC}: Monte Carlo Simulations with Machine-Learned Interatomic Potentials},
   author = {Evans, Jack D. and others},
