@@ -28,34 +28,71 @@ ionax  →  fast neural cDFT/DDFT for solid electrolytes
 torch-sim  →  MD transport properties (κ, D, η, g(r))
 ```
 
-### torch-sim — what is implemented (`implementation-branch`)
+### Using torch-sim to load the MLIP for neuromc
 
-Transport property calculations live in the `implementation-branch` of torch-sim:
+torch-sim provides GPU-accelerated MLIP wrappers (`MaceModel`, `FairChemModel`, `OrbModel`) that can be adapted as ASE calculators for use inside `neuromc.dft.particle_gcmc`. This is the recommended way to run neuromc simulations after training an MLIP with torch-sim:
 
-| Feature | Class / function | File |
-|---|---|---|
-| Thermal conductivity (RNEMD) | `RNEMD` | `torch_sim/workflows/RNEMD.py` |
-| Thermal conductivity (Green-Kubo) | `HeatFluxAutoCorrelation` | `torch_sim/properties/correlations.py` |
-| Diffusion coefficient | `VelocityAutoCorrelation` | `torch_sim/properties/correlations.py` |
-| Radial distribution function g(r) | `RadialDistributionFunction` | `torch_sim/properties/correlations.py` |
-| Shear viscosity (Green-Kubo) | `PressureAutoCorrelation` | `torch_sim/properties/correlations.py` |
-| Classical ionic reference | `FumiTosiModel` | `torch_sim/models/fumi_tosi.py` |
+```python
+import torch
+import torch_sim as ts
+from torch_sim.models.mace import MaceModel
+from ase.io import read
 
-**Neighbor-list acceleration — NVIDIA nvalchemiops**: torch-sim automatically uses [`nvalchemiops`](https://github.com/NVIDIA/nvalchemiops), NVIDIA's CUDA-accelerated neighbor-list library, when it is installed. This is purely a speed optimization (it is not a dispersion correction) that accelerates the pair-distance search at every MD step. Priority order at runtime:
+# ── 1. Load the trained MLIP via torch-sim ────────────────────────────────────
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+ts_model = MaceModel(
+    model="results/lipon_mace_compiled.model",   # trained MACE checkpoint
+    device=device,
+    dtype=torch.float64,
+    compute_forces=True,
+    compute_stress=True,
+)
+
+# ── 2. Wrap as an ASE calculator for neuromc ─────────────────────────────────
+from mace.calculators import MACECalculator   # native ASE interface from mace-torch
+
+ase_calc = MACECalculator(
+    model_paths="results/lipon_mace_compiled.model",
+    device=str(device),
+    default_dtype="float64",
+)
+
+# ── 3. Run neuromc particle GCMC ──────────────────────────────────────────────
+from neuromc.dft.particle_gcmc import generate_cdft_training_data
+
+framework = read("lipon_supercell.xyz")
+li_atom   = read("Li.xyz")
+
+dataset = generate_cdft_training_data(
+    framework, li_atom, ase_calc,
+    mu_values=[-4.0, -3.5, -3.0, -2.5],
+    T=600.0,
+)
+
+# ── 4. After collecting training data, run MD in torch-sim ───────────────────
+state = ts.state.initialize_state(framework, device, torch.float64)
+md_state = ts.integrate(
+    system=state,
+    model=ts_model,                         # torch-sim model (not ASE)
+    integrator=ts.Integrator.nvt_nose_hoover,
+    n_steps=100_000,
+    timestep=0.001,
+    temperature=600.0,
+)
+```
+
+**Neighbor-list acceleration inside torch-sim**: when running the MLIP in torch-sim, it automatically uses [`nvalchemiops`](https://github.com/NVIDIA/nvalchemiops) — NVIDIA's CUDA-accelerated neighbor-list library — if installed. This is a speed optimization for pair-distance search, not a dispersion correction. Priority order:
 
 ```
-nvalchemiops  (CUDA kernel, fastest — NVIDIA GPU only)
-vesin         (cross-platform, fast)
+nvalchemiops  (CUDA kernel — NVIDIA GPU only, fastest)
+vesin         (cross-platform)
 torch_nl      (pure PyTorch, always available)
 ```
 
-Install on NVIDIA hardware:
-
 ```bash
-pip install nvalchemiops
+pip install nvalchemiops   # optional, NVIDIA GPU only
 ```
-
-No code changes are needed — `torchsim_nl()` detects and uses it automatically.
 
 ---
 
