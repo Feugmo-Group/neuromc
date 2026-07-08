@@ -14,7 +14,6 @@ neuromc is part of a three-package ecosystem:
 |---|---|---|
 | **neuromc** | Generate MC/GCMC training data (density profiles, c₁, μ_ex) | this repo |
 | **ionax** | JAX-based PNP + cDFT/DDFT solver; target for the neural operators | `../ionax` |
-| **torch-sim** | GPU MD engine for running MLIP simulations | `../torch-sim` (`implementation-branch`) |
 
 The intended workflow:
 
