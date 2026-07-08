@@ -297,6 +297,129 @@ exp(−β·μ_ex) = ⟨exp(−β·ΔU)⟩_N
 
 ---
 
+## Paper examples
+
+### Sammüller et al. 2024 — Neural functional theory for 1D hard rods
+
+The Sammüller workflow trains a neural operator to learn c₁([ρ]) from GCMC data.
+neuromc reproduces this entirely in Python using the hard-rod engine and Percus reference.
+
+```python
+import numpy as np
+from neuromc.dft.hard_rod_sim import simulate, generate_random_vext
+from neuromc.dft.percus import c1_percus, dft_minimize
+from neuromc.dft.widom import widom_hard_rod
+
+L, T = 20.0, 1.0
+rng = np.random.default_rng(42)
+
+# ── Step 1: generate training snapshots under random external potentials ──────
+dataset = []
+for _ in range(200):
+    vext_fn = generate_random_vext(L, rng=rng, n_sin=3, amplitude=2.0)
+    mu = rng.uniform(-2.0, 0.5)
+
+    x, rho, mu_loc = simulate(L=L, mu=mu, T=T, vext_fn=vext_fn,
+                               n_equil=5_000, n_prod=50_000)
+
+    # Sammüller identity: c₁(x) = ln ρ(x) − βμ_loc(x)
+    # (set ρ floor to avoid log(0))
+    c1 = np.log(np.maximum(rho, 1e-12)) - mu_loc
+
+    dataset.append({"x": x, "rho": rho, "c1": c1,
+                    "vext": np.array([vext_fn(xi) for xi in x]),
+                    "mu": mu})
+
+# ── Step 2: compare GCMC density to Percus DFT on a new profile ──────────────
+vext_test = generate_random_vext(L, rng=rng)
+x_dft, rho_dft = dft_minimize(L=L, mu=-0.5, T=T,
+                               vext_fn=vext_test, c1_fn=c1_percus)
+x_mc, rho_mc, _ = simulate(L=L, mu=-0.5, T=T, vext_fn=vext_test,
+                             n_prod=100_000)
+
+# ── Step 3: Widom — excess chemical potential ─────────────────────────────────
+res = widom_hard_rod(L=L, mu=-0.5, T=T)
+print(f"mu_ex = {res['mu_ex']:.4f}   (exact: {-np.log(1 - rho_mc.mean()):.4f})")
+```
+
+The `dataset` list — with fields `x`, `rho`, `c1`, `vext`, `mu` — is the direct input
+for training the neural functional in the Sammüller 2024 tutorial
+([sfalmo/NeuralDFT-Tutorial](https://github.com/sfalmo/NeuralDFT-Tutorial)).
+
+---
+
+### Bui & Cox 2025 — Ionic structure at electrified interfaces
+
+The Bui & Cox workflow uses the 3D RPM model to generate ionic density profiles ρ±(z)
+near a charged wall and compute μ_ex± for each species.
+
+```python
+import numpy as np
+from neuromc.dft.rpm_sim import RPMSystem
+from neuromc.dft.widom import widom_rpm
+
+# ── System parameters ─────────────────────────────────────────────────────────
+Lx, Ly, Lz = 10.0, 10.0, 30.0   # box dimensions (σ units; σ = ion diameter)
+mu_plus  = -3.0                   # β·μ for cations
+mu_minus = -3.0                   # β·μ for anions
+beta     = 1.0                    # inverse temperature
+
+# ── Step 1: equilibrate the RPM system ───────────────────────────────────────
+rng = np.random.default_rng(0)
+system = RPMSystem(Lx=Lx, Ly=Ly, Lz=Lz,
+                   mu_plus=mu_plus, mu_minus=mu_minus,
+                   beta=beta, rng=rng)
+
+for _ in range(5_000):
+    system.sweep(n_transitions=100)
+
+# ── Step 2: production — accumulate density profiles ─────────────────────────
+n_bins = 100
+z_edges = np.linspace(system.z_wall, Lz - system.z_wall, n_bins + 1)
+dz = z_edges[1] - z_edges[0]
+hist_plus  = np.zeros(n_bins)
+hist_minus = np.zeros(n_bins)
+
+for _ in range(20_000):
+    system.sweep(n_transitions=100)
+    if system.n_plus > 0:
+        import numpy as _np
+        pos_p = _np.array(system._pos_plus)
+        hist_plus  += _np.histogram(pos_p[:, 2],  bins=z_edges)[0]
+    if system.n_minus > 0:
+        pos_m = _np.array(system._pos_minus)
+        hist_minus += _np.histogram(pos_m[:, 2], bins=z_edges)[0]
+
+bin_vol = Lx * Ly * dz
+rho_plus  = hist_plus  / (20_000 * bin_vol)
+rho_minus = hist_minus / (20_000 * bin_vol)
+z_centers = 0.5 * (z_edges[:-1] + z_edges[1:])
+
+# ── Step 3: Widom insertion — μ_ex for each species ──────────────────────────
+res = widom_rpm(Lx=Lx, Ly=Ly, Lz=Lz,
+                mu_plus=mu_plus, mu_minus=mu_minus,
+                beta=beta, n_equil=2_000, n_prod=10_000)
+
+print(f"mu_ex(+) = {res['mu_ex_plus']:.4f}")
+print(f"mu_ex(-) = {res['mu_ex_minus']:.4f}")
+
+# ── Step 4: c₁±(z) as ionax training target ──────────────────────────────────
+# c₁(z) = ln ρ(z) − βμ_loc(z)   (no external potential here → μ_loc = μ)
+c1_plus  = np.log(np.maximum(rho_plus,  1e-12)) - mu_plus
+c1_minus = np.log(np.maximum(rho_minus, 1e-12)) - mu_minus
+
+# Convert to ionax units (nm, nm⁻³)
+_ANG_TO_NM = 0.1
+z_nm      = z_centers * _ANG_TO_NM
+rho_p_nm3 = rho_plus  * 1000.0
+rho_m_nm3 = rho_minus * 1000.0
+```
+
+The `(z_nm, rho_p_nm3, c1_plus)` and `(z_nm, rho_m_nm3, c1_minus)` arrays are
+directly compatible with the `ExcessFreeEnergy.chemical_potential()` interface in ionax.
+
+---
+
 ## Citation
 
 If you use neuromc, please cite both this package and the original MLIP-MC it is derived from:
