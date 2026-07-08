@@ -3,13 +3,13 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mlip-mc"
-version = "0.1.3"
-description = "Monte Carlo Simulations with Machine-Learned Interatomic Potentials"
+name = "neuromc"
+version = "0.2.0"
+description = "Neural Monte Carlo: GCMC, classical DFT, and neural functional theory with machine-learned interatomic potentials"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-authors = [{ name = "MLIP-MC Contributors" }]
+authors = [{ name = "Conrard Tetsassi Feugmo" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -27,18 +27,23 @@ dev = ["pytest"]
 fairchem = ["fairchem-core"]
 mace-torch = ["mace-torch"]
 orb-models = ["orb-models"]
+dft = ["nvalchemi-toolkit", "warp-lang", "h5py", "pyyaml", "torch-sim-atomistic"]
+
+[tool.uv]
+dev-dependencies = ["pytest"]
 
 [project.scripts]
-mlip_mc = "mlip_mc.cli:main"
+neuromc = "neuromc.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/jackevansadl/MLIP-MC"
+Homepage = "https://github.com/Feugmo-Group/neuromc"
+"Original MLIP-MC" = "https://github.com/jackevansadl/MLIP-MC"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["mlip_mc", "mlip_mc.*"]
+include = ["neuromc", "neuromc.*"]
 
 [tool.setuptools.package-data]
-mlip_mc = ["data/*.csv"]
+neuromc = ["data/*.csv"]

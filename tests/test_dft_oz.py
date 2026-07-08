@@ -1,7 +1,7 @@
-"""Tests for mlip_mc.dft.oz."""
+"""Tests for neuromc.dft.oz."""
 import numpy as np
 import pytest
-from mlip_mc.dft.oz import oz_inversion_3d, oz_inversion_1d, free_energy_excess_ti
+from neuromc.dft.oz import oz_inversion_3d, oz_inversion_1d, free_energy_excess_ti
 
 
 class TestOZInversion3D:

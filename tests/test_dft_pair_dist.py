@@ -1,7 +1,7 @@
-"""Tests for mlip_mc.dft.pair_dist."""
+"""Tests for neuromc.dft.pair_dist."""
 import numpy as np
 import pytest
-from mlip_mc.dft.pair_dist import PairDistBulk, PairDistPlanar
+from neuromc.dft.pair_dist import PairDistBulk, PairDistPlanar
 
 
 class TestPairDistBulk:

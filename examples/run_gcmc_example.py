@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mlip_mc import run_gcmc
+from neuromc import run_gcmc
 
 
 def main() -> None:

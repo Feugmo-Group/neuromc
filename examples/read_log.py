@@ -1,4 +1,4 @@
-from mlip_mc import read_binary_log
+from neuromc import read_binary_log
 
 # Read the log file
 data = read_binary_log('results/log_0.10000bar.bin')

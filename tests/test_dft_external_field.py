@@ -1,7 +1,7 @@
-"""Tests for mlip_mc.dft.external_field."""
+"""Tests for neuromc.dft.external_field."""
 import numpy as np
 import pytest
-from mlip_mc.dft.external_field import (
+from neuromc.dft.external_field import (
     HardWall, LinearRamp, GaussianPocket, Sinusoid, FourierSeries,
     CompositeField, random_fourier_field, from_dict,
 )

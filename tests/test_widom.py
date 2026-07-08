@@ -9,7 +9,7 @@ import tempfile
 import shutil
 from unittest.mock import Mock, patch
 
-from mlip_mc.src.widom import MLP_Widom
+from neuromc.src.widom import MLP_Widom
 from ase import Atoms
 from ase.build import molecule
 from ase.data import vdw_radii

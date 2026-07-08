@@ -4,30 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-MLIP-MC performs Monte Carlo simulations (GCMC isotherms and Widom insertion) of gas adsorption in porous materials using machine-learned interatomic potentials on top of the ASE framework. Three interchangeable MLIP backends are supported: **fairchem**, **mace-torch**, and **orb-models** — the package auto-detects whichever one is installed.
+**neuromc** (Neural Monte Carlo) — derived from [jackevansadl/MLIP-MC](https://github.com/jackevansadl/MLIP-MC). Performs GCMC isotherms and Widom insertion for gas adsorption in porous materials, extended with a full classical DFT subpackage (`neuromc/dft/`) for model fluids, general particle GCMC (atoms/molecules/ions), and ionax-compatible training-data generation for neural cDFT operators.
+
+Three interchangeable MLIP backends: **fairchem**, **mace-torch**, **orb-models** — auto-detected.
 
 ## Common commands
 
 Install for development (pick one backend):
 ```bash
 pip install -e ".[fairchem,dev]"       # or [mace-torch,dev] or [orb-models,dev]
+pip install -e ".[dft,dev]"            # DFT subpackage (JAX env recommended)
 ```
 
-Run the CLI (installed as `mlip_mc`, defined at `mlip_mc/cli.py`):
+Run the CLI (installed as `neuromc`, defined at `neuromc/cli.py`):
 ```bash
-mlip_mc --mode gcmc  --adsorbent framework.xyz --adsorbate-molecule CO2 \
+neuromc --mode gcmc  --adsorbent framework.xyz --adsorbate-molecule CO2 \
         --temperature 298.0 --pressures 0.1,1.0,5.0 --model model.pt
-mlip_mc --mode widom --adsorbent framework.xyz --adsorbate-molecule CO2 \
+neuromc --mode widom --adsorbent framework.xyz --adsorbate-molecule CO2 \
         --temperature 298.0 --n-trials 10000 --model model.pt
 ```
 
-Models may be a local path or an `hf://org/repo[:filename]` URI; downloads are cached at `$MLIP_MC_CACHE` (default `~/.cache/mlip-mc/<repo>/<filename>`).
+Models may be a local path or an `hf://org/repo[:filename]` URI; downloads cached at `$NEUROMC_CACHE` (default `~/.cache/neuromc/`).
 
 Tests (pytest):
 ```bash
 pytest                              # full suite
 pytest tests/test_gcmc.py           # single file
-pytest tests/test_gcmc.py::TestEInteractionOfAdsorption::test_calculation  # single test
+pytest tests/test_gcmc.py::TestEInteractionOfAdsorption::test_calculation
 pytest -k widom                     # by keyword
 ```
 
@@ -35,33 +38,40 @@ pytest -k widom                     # by keyword
 
 Three-layer structure — keep this separation intact when editing:
 
-1. **CLI / orchestration** (`mlip_mc/cli.py`, `mlip_mc/main.py`)
+1. **CLI / orchestration** (`neuromc/cli.py`, `neuromc/main.py`)
    - `cli.py::main` parses args and dispatches to `run_gcmc` / `run_widom` in `main.py`.
-   - `main.py` handles model resolution (`_resolve_model_spec` for the `hf://` scheme), HF download/caching, backend detection (`_detect_backend`), calculator loading (`_load_model`), structure loading via ASE, and result aggregation. It also owns all pretty-printed banner/table output.
-   - `main.py` at the top-level module scope installs warning/logging filters — these must stay at module scope because `mp.set_start_method('spawn')` re-imports this module inside each worker process, and the filters need to reapply there.
-   - The top-level `main.py` in the repo root is a thin shim that imports from `mlip_mc.main`; keep them consistent.
+   - `main.py` handles model resolution (`_resolve_model_spec` for `hf://`), HF caching, backend detection (`_detect_backend`), calculator loading (`_load_model`), structure loading, result aggregation, and all banner/table output.
+   - Warning/logging filters are installed at `main.py` module scope — they must stay there because `mp.set_start_method('spawn')` re-imports the module in each worker.
+   - The repo-root `main.py` is a thin shim importing from `neuromc.main`; keep them consistent.
 
-2. **Physics engines** (`mlip_mc/src/gcmc.py`, `mlip_mc/src/widom.py`)
-   - `MLP_GCMC` implements Grand Canonical MC with four move types (insertion / deletion / translation / rotation, thresholds in `MOVE_PROBABILITIES`). It writes a binary log (`log_{P}bar.bin`), per-step restart files under `restart/`, periodic checkpoints under `checkpoints_{P}bar/`, and an optional trajectory. Restart-from-crash is a first-class feature — check the restart-loading path before changing log/checkpoint formats.
-   - `MLP_Widom` implements Widom insertion; only computes energies of random insertions and tracks Boltzmann-weighted averages. It shares helpers (`random_position`, `vdw_overlap`) with the GCMC engine.
-   - Both take a pre-constructed ASE calculator as `model` — they do not know about backends.
+2. **Physics engines** (`neuromc/src/gcmc.py`, `neuromc/src/widom.py`)
+   - `MLP_GCMC`: four move types (insert/delete/translate/rotate), binary log (`log_{P}bar.bin`), restart files (`restart/`), checkpoints (`checkpoints_{P}bar/`). Restart-from-crash is first-class — check the restart path before changing log/checkpoint formats.
+   - `MLP_Widom`: Widom insertion for porous-material adsorption; shares `random_position` and `vdw_overlap` helpers with the GCMC engine.
+   - Both receive a pre-constructed ASE calculator as `model` and know nothing about backends.
 
-3. **Utilities** (`mlip_mc/src/utilities.py`)
-   - `PREOS` (Peng-Robinson equation of state) computes fugacities from critical-property table `mlip_mc/data/critical_acentric.csv`. If the adsorbate name is missing from the table, callers fall back to ideal-gas (`fugacity = P`) — preserve this fallback.
-   - `read_binary_log` / `read_widom_binary_log` parse the custom struct-packed binary log format; these are part of the public API (re-exported from `mlip_mc/__init__.py`) and consumers depend on their record layout.
+3. **Utilities** (`neuromc/src/utilities.py`)
+   - `PREOS` computes fugacities from `neuromc/data/critical_acentric.csv`; falls back to ideal-gas if adsorbate is missing — preserve this fallback.
+   - `read_binary_log` / `read_widom_binary_log` parse the struct-packed binary log; re-exported from `neuromc/__init__.py` as public API.
+
+4. **DFT subpackage** (`neuromc/dft/`)
+   - `hard_rod_sim.py` — 1D GCMC (`HardRodSystem`, `simulate`). Sweep uses fixed-rate GC moves (not N-scaling) for detailed balance.
+   - `rpm_sim.py` — 3D RPM ionic GCMC (`RPMSystem`).
+   - `percus.py` — Percus exact FMT: `c1_percus` includes both convolution terms (ln(1−n₁) ⊛ ω₀ and n₀/(1−n₁) ⊛ ω₁). Do not simplify.
+   - `oz.py` — Ornstein-Zernike inversion.
+   - `widom.py` — `WidomHardRod`, `WidomRPM`.
+   - `particle_gcmc.py` — `ParticleGCMC` (atoms/molecules/ions with any ASE calculator); `generate_cdft_training_data` outputs ionax-compatible c₁ profiles (kT units, nm grid). ASE is imported lazily inside methods — the `neuromc.dft` package works without ASE.
 
 ### GPU parallelism model
 
-GCMC over multiple pressures uses `multiprocessing.Process` with the **spawn** start method (`main.py::run_gcmc`). Each worker sets `CUDA_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES` **before** importing torch or the MLIP backend — this is why `_load_model` and its imports live inside `run_single_pressure` rather than at module top. Do not hoist those imports out; doing so breaks GPU isolation. Inside a worker the device is always `'cuda'` (never `'cuda:N'`), because masking makes the selected GPU appear as index 0.
+GCMC over multiple pressures uses `multiprocessing.Process` with **spawn** (`main.py::run_gcmc`). Each worker sets `CUDA_VISIBLE_DEVICES` / `HIP_VISIBLE_DEVICES` before importing torch — that is why `_load_model` and backend imports live inside `run_single_pressure`. Do not hoist them out. Inside a worker the device is always `'cuda'` (index 0 after masking).
 
 ### Backend abstraction
 
-`_detect_backend` probes installed packages in a fixed order (fairchem → mace-torch → orb-models) and `_load_model` branches on the returned name. orb-models is special: if the user-supplied `model_path` does not exist on disk, `_load_model` falls back to the pretrained checkpoint (`pretrained.orb_v3_conservative_inf_omat`) rather than erroring. Preserve that behavior for orb-models specifically.
+`_detect_backend` probes in order: fairchem → mace-torch → orb-models. orb-models falls back to `pretrained.orb_v3_conservative_inf_omat` when no local model path exists — preserve this.
 
 ### Output layout
 
-Every run writes to `output_dir` (default `results/`):
-- GCMC: `isotherm_data.json` (aggregate), plus per-pressure `log_{P}bar.bin`, `traj_{P}bar.xyz`, `restart/restart_{P}bar.{xyz,json}`, `checkpoints_{P}bar/checkpoint_{step}/`.
-- Widom: `widom_results.json`, `log_widom.bin`, `widom_trajectory.xyz`, `restart/restart_widom.{xyz,json}`.
+- GCMC: `isotherm_data.json`, `log_{P}bar.bin`, `traj_{P}bar.xyz`, `restart/`, `checkpoints_{P}bar/`.
+- Widom: `widom_results.json`, `log_widom.bin`, `widom_trajectory.xyz`, `restart/`.
 
-The binary log is authoritative — averages in `isotherm_data.json` are re-derived from it in `run_single_pressure` (falling back to `.npz` / `.json` legacy formats if the `.bin` is absent).
+Binary log is authoritative; averages in JSON are re-derived from it.

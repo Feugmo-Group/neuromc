@@ -9,7 +9,7 @@ import tempfile
 import shutil
 from unittest.mock import Mock, MagicMock, patch
 
-from mlip_mc.src.gcmc import MLP_GCMC, e_interaction_of_adsorption
+from neuromc.src.gcmc import MLP_GCMC, e_interaction_of_adsorption
 from ase import Atoms
 from ase.build import molecule
 from ase.io import read, write

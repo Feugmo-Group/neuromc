@@ -13,7 +13,7 @@ automatically.
 
 from pathlib import Path
 
-from mlip_mc import run_widom
+from neuromc import run_widom
 
 
 def main() -> None:

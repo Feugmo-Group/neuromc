@@ -1,247 +1,276 @@
-# MLIP-MC
+# neuromc
 
-ASE framework for Monte Carlo simulations with universal Machine-Learned Interatomic Potentials (MLIP).
+**Neural Monte Carlo** — Grand Canonical Monte Carlo, classical density functional theory, and neural functional theory data generation, powered by machine-learned interatomic potentials.
 
-## Overview
+> **Derived from** [jackevansadl/MLIP-MC](https://github.com/jackevansadl/MLIP-MC), which provides the original GCMC engine for gas adsorption in porous materials. neuromc extends that foundation with a full classical DFT subpackage, general particle GCMC for atoms/molecules/ions, Widom insertion, and a training-data pipeline for neural operators targeting the [ionax](../ionax) PNP-cDFT solver.
 
-MLIP-MC is a Python package for performing Monte Carlo simulations of gas adsorption in porous materials using machine-learned interatomic potentials. The package integrates seamlessly with the ASE (Atomic Simulation Environment) framework and supports MLIP models from **FAIRChem**, **MACE-Torch** and **Orbital** backends.
+---
+
+## What neuromc does
+
+| Module | Capability |
+|---|---|
+| `neuromc` (core) | GCMC isotherms and Widom insertion for gas adsorption using any MLIP backend |
+| `neuromc.dft` | 1D hard-rod and 3D RPM model-fluid GCMC + Percus/FMT classical DFT |
+| `neuromc.dft.particle_gcmc` | General GCMC for **atoms, molecules, and ions** with any ASE calculator |
+| `neuromc.dft.widom` | Widom test-particle insertion (hard rods + RPM ionic system) |
+| `neuromc.dft.percus` | Percus exact 1D FMT functional with full c₁ (both convolution terms) |
+| `neuromc.dft.oz` | Ornstein-Zernike inversion for c⁽²⁾ and pair correlations |
+
+The `neuromc.dft` subpackage generates training data for neural operators that replace classical FMT+MSA functionals inside ionax, enabling fast neural cDFT/DDFT for solid electrolytes.
+
+---
 
 ## Installation
 
-### Backend Selection
-
-MLIP-MC supports three MLIP backends. You must install one of them:
-
-- **FAIRChem**: For models trained with FAIRChem (e.g., OC20, OC22 models)
-- **MACE-Torch**: For MACE models (e.g., MACE-MP models)
-- **Orbital**: For Orbital models (e.g. orb_v3_conservative_inf_omat)
-
-### Install from PyPI (Recommended)
-
-Install MLIP-MC with your preferred backend directly from PyPI:
-
-**With FAIRChem backend:**
-```bash
-pip install "mlip-mc[fairchem]"
-```
-
-**With MACE-Torch backend:**
-```bash
-pip install "mlip-mc[mace-torch]"
-```
-
-**With Orbital backend:**
-```bash
-pip install "mlip-mc[orb-models]"
-```
-
-> **ROCm users:** Install the ROCm version of PyTorch first before installing MLIP-MC:
-> ```bash
-> pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/rocm6.4
-> ```
-
-### Install from Source
-
-Clone the repository and install locally:
+Pick one MLIP backend. The package auto-detects whichever is installed.
 
 ```bash
-git clone https://github.com/jackevansadl/MLIP-MC.git
-cd MLIP-MC
-pip install ".[fairchem]"   # or ".[mace-torch]" or ".[orb-models]"
+# Clone
+git clone https://github.com/Feugmo-Group/neuromc.git
+cd neuromc
+
+# Install with MACE backend (recommended)
+pip install -e ".[mace-torch,dev]"
+
+# Or with fairchem
+pip install -e ".[fairchem,dev]"
+
+# Or with orb-models
+pip install -e ".[orb-models,dev]"
+
+# Install the full DFT subpackage (JAX environment recommended)
+pip install -e ".[dft,dev]"
 ```
 
-**Development mode (includes test tooling):**
-```bash
-pip install -e ".[BACKEND_OF_YOUR_CHOICE,dev]"
-```
+Model weights are resolved automatically. Pass a local path or an `hf://org/repo[:filename]` URI; downloads are cached at `$NEUROMC_CACHE` (default `~/.cache/neuromc/`).
 
-## Usage
+---
 
-### Command-Line Interface
+## CLI — gas adsorption (core)
 
-#### GCMC Isotherm Simulation
+The `neuromc` command provides two simulation modes.
 
-```bash
-# Multiple pressure points (auto-distributed across GPUs)
-mlip_mc \\
-    --mode gcmc \\
-    --adsorbent framework.xyz \\
-    --adsorbate-molecule CO2 \\
-    --temperature 298.0 \\
-    --pressures 0.1,0.5,1.0,2.0,5.0,10.0,20.0 \\
-    --n-equil 10000 \\
-    --n-prod 20000 \\
-    --model models/model.pt \\
-    --output-dir results \\
-    --checkpoint-interval 10000 \\
-    --write-trajectory \\
-    --trajectory-interval 100
-```
-
-#### Widom Insertion
+### GCMC isotherm
 
 ```bash
-# Basic Widom insertion calculation
-mlip_mc \\
-    --mode widom \\
-    --adsorbent framework.xyz \\
-    --adsorbate-molecule CO2 \\
-    --temperature 298.0 \\
-    --n-trials 10000 \\
-    --model models/model.pt \\
-    --output-dir widom_results
+neuromc --mode gcmc \
+        --adsorbent framework.xyz \
+        --adsorbate-molecule CO2 \
+        --temperature 298.0 \
+        --pressures 0.1,1.0,5.0 \
+        --model model.pt
 ```
 
-**Command-Line Arguments:**
-- `--mode`: Simulation mode: `gcmc` (Grand Canonical Monte Carlo) or `widom` (Widom insertion) (default: `gcmc`)
-- `--adsorbent`: Path to adsorbent structure file (.xyz, .cif, etc.) **(required)**
-- `--adsorbate-path`: Path to adsorbate structure file (optional). The chemical formula will be automatically extracted to match with the fugacity table.
-- `--adsorbate-molecule`: Molecule name (e.g., CO2, CH4) if not using file. This name will be used to match with the fugacity table.
-- `--temperature`: Temperature in Kelvin **(required)**
-- `--pressures`: Comma-separated pressures in bar, or single number **(required for GCMC mode)**
-- `--n-equil`: Number of equilibration steps for GCMC (default: 10000)
-- `--n-prod`: Number of production steps for GCMC (default: 20000)
-- `--n-trials`: Number of Widom insertion trials (default: 10000)
-- `--checkpoint-interval`: Interval for saving history checkpoints in GCMC (default: 10000)
-- `--model`: Path to MLIP model file **(required)**. Can be a local path or a Hugging Face URI (e.g., `hf://your-org/your-repo` or `hf://your-org/your-repo:model.pt`). When using the `hf://` scheme, files are automatically downloaded and cached. The model format should match your installed backend (FAIRChem `.pt` files or MACE `.model` files).
-- `--output-dir`: Output directory (default: results)
-- `--write-trajectory`: Specifies to write out simulation trajectory every `--trajectory-interval` steps (default: False)
-- `--trajectory-interval`: Interval for saving structures into trajectory file (default: 100)
-- `--hf-token`: Hugging Face access token for downloading private models or bypassing interactive login (optional)
-- `--gpu-id`: GPU device ID to use (for Widom mode, default: 0, use -1 for CPU)
-- `overwrite_checkpoints`: Specifies to overwrite checkpoint files every `--checkpoint-interval` steps (default: False)
+### Widom insertion (Henry coefficient)
 
-**Model caching:** When using the `hf://` scheme, downloads are cached under `~/.cache/mlip-mc/<repo>/<filename>` (or a custom directory set via the `MLIP_MC_CACHE` environment variable). Subsequent runs reuse the cached file even when launched from different working directories.
+```bash
+neuromc --mode widom \
+        --adsorbent framework.xyz \
+        --adsorbate-molecule CO2 \
+        --temperature 298.0 \
+        --n-trials 10000 \
+        --model model.pt
+```
 
-**Note:** The adsorbate name for EOS (fugacity) calculation is automatically determined:
-- If `--adsorbate-molecule` is provided, that name is used to match with the fugacity table
-- If `--adsorbate-path` is provided, the chemical formula is extracted from the structure file using ASE
-- If the name/formula doesn't match any entry in the fugacity table, the simulation falls back to ideal gas approximation
+Output lands in `results/` by default (`--output-dir` to override):
 
-### Python Interface
+```
+results/
+  isotherm_data.json          # GCMC aggregate
+  log_{P}bar.bin              # binary log (authoritative)
+  traj_{P}bar.xyz
+  restart/restart_{P}bar.*
+  widom_results.json          # Widom
+  log_widom.bin
+```
 
-You can also use the package programmatically for more control and integration into your workflows:
+---
 
-#### GCMC Isotherm
+## Python API — classical DFT and model fluids
+
+### 1D hard-rod fluid (Sammüller 2024)
 
 ```python
-from mlip_mc import run_gcmc
+from neuromc.dft.hard_rod_sim import simulate
+from neuromc.dft.percus import c1_percus, dft_minimize
 
-# Run GCMC simulation
-results = run_gcmc(
-    adsorbent_path="framework.xyz",
-    adsorbate_molecule="CO2",
-    temperature=298.0,
-    pressure_points=[0.1, 1.0, 5.0],
-    n_equilibration_steps=10000,
-    n_production_steps=20000,
-    model_path="models/model.pt",  # or use hf://your-org/your-repo
-    output_dir="results",
-    write_trajectory=True,
-    trajectory_interval=100,
-    checkpoint_interval=10000
-)
+# GCMC density profile
+x, rho_mc, _ = simulate(L=30.0, mu=-1.0, T=1.0,
+                         vext_fn=lambda x: 0.0,
+                         n_prod=100_000)
 
-# Access results
-print(f"Pressures: {results['pressures']}")
-print(f"Uptakes: {results['uptakes']}")
-print(f"Temperature: {results['temperature']} K")
-```
-
-#### Widom Insertion
-
-```python
-from mlip_mc import run_widom
-
-# Run Widom insertion calculation
-results = run_widom(
-    adsorbent_path="framework.xyz",
-    adsorbate_molecule="CO2",
-    temperature=298.0,
-    n_trials=10000,
-    model_path="models/model.pt",  # or use hf://your-org/your-repo
-    output_dir="widom_results"
+# Percus DFT profile
+x_dft, rho_dft = dft_minimize(
+    L=30.0, mu=-1.0, T=1.0,
+    vext_fn=lambda x: 0.0,
+    c1_fn=c1_percus,
 )
 ```
 
-## Output Files
+### Widom insertion
 
-Simulations generate output files in the specified output directory (default: `results/`):
+```python
+from neuromc.dft.widom import widom_hard_rod, widom_rpm
 
-- **GCMC Isotherm (using `run_gcmc()`)**:
-  - `isotherm_data.json`: Complete isotherm data (pressures, uptakes, energies, etc.)
-  - `log_{pressure}bar.bin`: Binary log file containing all iteration data with trajectory (step, uptake, interaction_energy, total_energy)
-  - `traj_{pressure}bar.xyz`: Simulation trajectory
-  - `restart/restart_{pressure}bar.xyz` and `.json`: Restart information (updated every step for crash recovery)
-  - `checkpoints_{pressure}bar/checkpoint_{step}/`: History checkpoints saved at intervals specified by `--save-interval`
-    - `traj.xyz`: Snapshot trajectory
-    - `results.json`: Snapshot results (n_iter, uptake, interaction_energy, total_energy)
-  
-- **GCMC (direct class usage)**: 
-  - `log_{pressure}bar.bin`: Binary log file with all iteration data
-  - `restart/restart_{pressure}bar.xyz` and `.json`: Restart information
-  - `checkpoints_{pressure}bar/checkpoint_{step}/`: History checkpoints
-  - `traj_{pressure}bar.xyz`: simulation trajectory
-  
-- **Widom Insertion**:
-  - `widom_results.json`: Adsorption energies and calculated properties (Henry's constant, weighted average energy, etc.)
-  - `log_widom.bin`: Binary log file containing all valid insertions with trajectory data (trial number, adsorption energy, total energy, atomic structure) - one record per valid insertion
-  - `widom_trajectory.xyz`: Last valid insertion structure saved at the end of simulation
-  - `restart/restart_widom.xyz` and `.json`: Restart information (updated every step for crash recovery)
+# Hard rods
+result = widom_hard_rod(L=30.0, mu=-1.0, T=1.0)
+print(f"mu_ex = {result['mu_ex']:.4f},  henry = {result['henry']:.4f}")
 
-### Isotherm Data Format
-
-The `isotherm_data.json` file contains:
-```json
-{
-    "temperature": 298.0,
-    "pressures": [0.1, 0.5, 1.0, ...],
-    "uptakes": [0.5, 1.2, 2.1, ...],
-    "uptake_stds": [0.1, 0.2, 0.3, ...],
-    "adsorption_energies": [-0.15, -0.18, -0.20, ...],
-    "unit_cell_volume_A3": 1234.5,
-    "unit_cell_volume_cm3": 1.234e-21,
-    "adsorbent_file": "tests/zif8.xyz",
-    "n_equilibration_steps": 10000,
-    "n_production_steps": 20000
-}
+# RPM ionic system
+result = widom_rpm(Lx=10.0, Ly=10.0, Lz=20.0,
+                   mu_plus=-2.0, mu_minus=-2.0)
+print(f"mu_ex+/- = {result['mu_ex_plus']:.3f}, {result['mu_ex_minus']:.3f}")
 ```
 
-## Supported Compounds
+### General particle GCMC (atoms / molecules / ions)
 
-The Peng-Robinson EOS supports the following compounds (via `PREOS.from_name()`):
+Works with any ASE calculator — MLIP, classical force field, or mock.
 
-`H2 (hydrogen)`    `He (helium)`        `NH3 (ammonia)`      `H2O (water)`  
-`CH4 (methane)`    `N2 (nitrogen)`      `O2 (oxygen)`        `Ar (argon)`  
-`CO (carbon monoxide)` `CO2 (carbon dioxide)` `C2H2 (acetylene)`  `C2H6 (ethane)`  
-`C3H8 (propane)`   `C4H10 (butane)`     `C6H6 (benzene)`     `C6H14 (n-hexane)`
+```python
+from neuromc.dft.particle_gcmc import simulate_particle_gcmc, generate_cdft_training_data
+from ase.io import read
+
+framework  = read("lipon_supercell.xyz")
+li_atom    = read("Li.xyz")        # single Li atom
+calculator = ...                   # any ASE Calculator
+
+z_centers, rho, *_ = simulate_particle_gcmc(
+    framework, li_atom, calculator,
+    mu=-3.5, T=600.0,
+)
+
+# Generate ionax-compatible training data
+dataset = generate_cdft_training_data(
+    framework, li_atom, calculator,
+    mu_values=[-4.0, -3.5, -3.0, -2.5],
+    T=600.0,
+)
+# Each entry: z_nm, rho_nm3, c1, vext_kT, mu, T, avg_n
+```
+
+The `c₁(z)` values directly implement `ExcessFreeEnergy.chemical_potential()` from the ionax interface (kT units, nm grid).
+
+---
+
+## Architecture
+
+Three-layer structure:
+
+### 1. CLI / orchestration (`neuromc/cli.py`, `neuromc/main.py`)
+
+`cli.py::main` parses arguments and dispatches to `run_gcmc` / `run_widom` in `main.py`. Model resolution (`hf://` URIs), backend detection, and calculator loading all live in `main.py`. GPU parallelism over pressures uses `multiprocessing` with the **spawn** start method — calculator imports must stay inside worker functions to preserve GPU isolation.
+
+### 2. Physics engines (`neuromc/src/`)
+
+- `gcmc.py` — `MLP_GCMC`: four move types (insert/delete/translate/rotate), binary log, restart files, checkpoints
+- `widom.py` — `MLP_Widom`: Widom insertion for porous-material gas adsorption
+- `utilities.py` — `PREOS` (Peng-Robinson EOS for fugacities), binary log readers
+
+### 3. Classical DFT subpackage (`neuromc/dft/`)
+
+| File | Contents |
+|---|---|
+| `hard_rod_sim.py` | 1D GCMC for hard rods; `HardRodSystem`, `simulate` |
+| `rpm_sim.py` | 3D RPM ionic GCMC; `RPMSystem` |
+| `percus.py` | Percus exact FMT; `c1_percus`, `dft_minimize` |
+| `oz.py` | Ornstein-Zernike inversion; `oz_invert`, `oz_solve` |
+| `widom.py` | `WidomHardRod`, `WidomRPM` and convenience drivers |
+| `particle_gcmc.py` | `ParticleGCMC`, `simulate_particle_gcmc`, `generate_cdft_training_data` |
+| `pair_dist.py` | Pair distribution function utilities |
+| `density_grid.py` | Grid and density field helpers |
+| `neural_functional.py` | Neural operator interface for trained c₁ models |
+| `sample_writer.py` | HDF5 output for training datasets |
+| `campaign.py` | Multi-condition campaign runner |
+| `external_field.py` | External potential helpers |
+
+---
+
+## MLIP backends
+
+Three backends are supported and auto-detected in order:
+
+| Backend | Install | Notes |
+|---|---|---|
+| **fairchem** | `pip install fairchem-core` | UMA / eSEN foundation models |
+| **mace-torch** | `pip install mace-torch` | MACE-MP; `dispersion=True` adds D3 correction |
+| **orb-models** | `pip install orb-models` | Falls back to pretrained `orb_v3_conservative_inf_omat` if no local path given |
+
+---
+
+## Tests
+
+```bash
+pytest                                       # full suite
+pytest tests/test_gcmc.py                   # core GCMC
+pytest tests/test_dft_widom.py              # DFT Widom
+pytest tests/test_dft_particle_gcmc.py      # particle GCMC (requires ASE)
+pytest -k hard_rod                          # by keyword
+pytest tests/test_gcmc.py::TestEInteractionOfAdsorption::test_calculation  # single test
+```
+
+75 tests pass without ASE. 37 additional tests (particle GCMC) require an ASE-enabled environment.
+
+---
+
+## Key physics
+
+**Tonks EOS** (exact, 1D hard rods):
+
+```
+βμ = ln(ρ/(1−ρ)) + ρ/(1−ρ)
+```
+
+**Percus c₁** (full FMT functional derivative):
+
+```
+c₁(r) = [(ln(1−n₁)) ⊛ ω₀](r) − [(n₀/(1−n₁)) ⊛ ω₁](r)
+```
+
+**Sammüller identity** (neural functional training target):
+
+```
+c₁(r) = ln ρ(r) − βμ_loc(r)
+```
+
+**Widom insertion**:
+
+```
+exp(−β·μ_ex) = ⟨exp(−β·ΔU)⟩_N
+```
+
+---
 
 ## Citation
 
-If you use this code in your research, please cite:
+If you use neuromc, please cite the original MLIP-MC package:
 
 ```bibtex
 @software{mlip_mc,
-  title = {MLIP-MC: Monte Carlo Simulations with Machine-Learned Interatomic Potentials},
-  author = {Edwards, Connor W. and Yang, Fengxu and Stracke, Konstantin and Evans, Jack D.},
-  year = {2025},
-  license = {MIT}
+  title  = {{MLIP-MC}: Monte Carlo Simulations with Machine-Learned Interatomic Potentials},
+  author = {Evans, Jack D. and others},
+  url    = {https://github.com/jackevansadl/MLIP-MC},
 }
 ```
 
-## License
+For the classical DFT and neural functional theory components:
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+```bibtex
+@article{sammüller2024neural,
+  title   = {Neural functional theory for inhomogeneous fluids: Fundamentals and applications},
+  author  = {Samm{\"u}ller, Florian and Hermann, Sophie and Schmidt, Matthias},
+  journal = {J. Phys.: Condens. Matter},
+  volume  = {36},
+  pages   = {243002},
+  year    = {2024},
+}
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Acknowledgments
-
-Much of the code in this repository is based on or derived from the work published at:
-- **Zenodo**: [10.5281/zenodo.7904959](https://doi.org/10.5281/zenodo.7904959)
-
-Additional acknowledgments:
-- Built on the ASE framework
-- Supports MLIP models from FAIRChem, MACE-Torch and Orbital
+@article{bui2025ionic,
+  title   = {Ionic Structure at Electrified Interfaces from Classical Density Functional Theory},
+  author  = {Bui, Alice T. and Cox, Stephen J.},
+  journal = {Phys. Rev. Lett.},
+  volume  = {134},
+  pages   = {148001},
+  year    = {2025},
+}
+```

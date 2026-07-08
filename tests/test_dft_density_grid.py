@@ -1,8 +1,8 @@
-"""Tests for mlip_mc.dft.density_grid."""
+"""Tests for neuromc.dft.density_grid."""
 import numpy as np
 import pytest
-from mlip_mc.dft.density_grid import DensityGrid1D, DensityGrid3D
-from mlip_mc.dft.external_field import LinearRamp
+from neuromc.dft.density_grid import DensityGrid1D, DensityGrid3D
+from neuromc.dft.external_field import LinearRamp
 
 
 class TestDensityGrid1D:

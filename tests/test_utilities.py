@@ -5,7 +5,7 @@ import pytest
 import numpy as np
 from unittest.mock import patch
 
-from mlip_mc.src.utilities import (
+from neuromc.src.utilities import (
     _random_rotation,
     random_position,
     vdw_overlap,
